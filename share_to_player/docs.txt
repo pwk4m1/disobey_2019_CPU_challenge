@@ -31,7 +31,6 @@ Chipset:
 
 ----------------------------------------------------------------------------
 
-
 CPU Registers:
 
 	al, bl, cl, dl	: 8-bit general purpose registers
@@ -48,6 +47,13 @@ CPU Registers:
 	pc : points to current address at executable code.
 	sp : points to current top of stack address
 	rp : points to address where to return after call
+
+al : 0x20
+bl : 0x21
+cl : 0x22
+dl : 0x23
+si : 0x24
+di : 0x25
 
 flags:
 	overflow
