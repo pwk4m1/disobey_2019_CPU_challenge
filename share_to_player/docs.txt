@@ -1,0 +1,258 @@
+
+Heya.
+
+After Spectre and Meltdown I rolled my own
+secure-by-default CPU architecture. I currently have
+a public & open test-server for anyone to use.
+
+IP:TCP-port pair reserved for it should be made known to
+you in a separate message.
+
+Following text contains technical specifications related to
+both chipset of board used, as well as to CPU arch rolled.
+
+Do note that maximum amount of cpu-cycles to be executed in
+this test environment is 0x4000. After that you'll be hitting
+CPU-fault. (This is to prevent some funny person from trying to DOS
+by running multiple infinite loops.)
+
+CPU reset does not reset the counter counting your cycles :P
+
+----------------------------------------------------------------------------
+
+Chipset:
+	CPU, re-flashable over i2c
+	Flash ROM, read/write over SPI, used for storage-space for microcode
+	Flash ROM, Read/write over SPI, used as stack by bootloader
+	Screen, read/write over VGA, 80x25 bytes of video-memory
+
+	Also contains a simple serial port for debugging incase
+	of issues with screen.
+
+----------------------------------------------------------------------------
+
+
+CPU Registers:
+
+	al, bl, cl, dl	: 8-bit general purpose registers
+	si, di		: 8-bit source - & destination index registers
+	flags		: 8-bit register containing different flags :P
+
+	pc		: 16-bit program counter
+	sp		: 16-bit stack pointer
+	rp		: 16-bit return pointer
+	
+	al, bl, cl, dl, si, and di may be used however you wish.
+	flags, pc, sp, and rp may not be directly accessed.
+
+	pc : points to current address at executable code.
+	sp : points to current top of stack address
+	rp : points to address where to return after call
+
+flags:
+	overflow
+	zero
+	equal
+	carry
+
+----------------------------------------------------------------------------
+
+8-bit registers are referred as r8_1 and r8_2 from now on, r8_1 being
+target register & r8_2 being source register.
+
+constant/numeric values are referred as const from now on.
+
+CPU Instruction sheet:
+	format:
+		syntax
+		opcode
+		description
+		affected flags
+
+	movc:
+		movc <r8_1>, <const>
+		0x01
+		moves constant 8-bit value to 8-bit register
+
+	mov:
+		mov <r8_1>, <r8_2>
+		0x02
+		moves 8-bit value from r8_2 to r8_1
+
+	inc:
+		inc <r8_1>
+		0x03
+		increases value of r8_1 by one
+		overflow if r8_1 > 0xff
+
+	dec:
+		dec <r8_1>
+		0x04
+		decreases value of r8_1 by one
+		overflow if r8_1 < 0x00
+
+	add:
+		add <r8_1>, <r8_2>
+		0x05
+		adds value from r8_2 to value of r8_1
+		overflow if r8_1 > 0xff
+
+	sub:
+		sub <r8_1>, <r8_2>
+		0x06
+		substracts value from r8_1 from value of r8_1
+		overflow if r8_1 < 0xff
+
+	jmp:
+		jmp <const>
+		0x07
+		jump to address al:const
+
+	cmp:
+		cmp <r8_1>, <r8_2>
+		0x08
+		Compare values of r8_1 and r8_2
+		Equal if r8_1 == r8_2
+
+	je/jne/jc/jo:
+		j<n/e/c> <const>
+		0x09, 0x0a, 0x16, 0x17
+		Jump if equal, not equal, overflow, or carry-flag
+
+	push:
+		push <r8_1>
+		0x0b
+		push content of r8_1 to stack memory, sp += 1
+
+	pop:
+		pop <r8_1>
+		0x0c
+		pop value from stack to r8_1, sp -= 1
+
+	int:
+		int
+		0x0d
+		Trigger SWINT, see SWINT section.
+		carry on error
+
+	hlt:
+		hlt
+		0x0e
+		Halt the CPU
+
+	and, or, xor:
+		and/or/xor <r8_1>, <r8_2>
+		0x11, 0x12, 0x13
+		do bitwise AND/OR/XOR (&, |, ^ in C)
+		zero if result -> 0
+
+	call:
+		call <const>
+		0x14
+		Call function located at al:const.
+
+	ret:
+		ret
+		0x15
+		Return from function to call+2
+
+----------------------------------------------------------------------------
+
+SoftWare INTerrupts (SWINTs)
+
+Software may trigger an Interrupt by executing `int` opcode. This causes
+CPU microcode to enter in to higher-privileged execution mode, perform 
+actions asked by bootloader-code, and return back to bootloader code at
+int+1.
+
+Interrupts may be used for multiple actions, such as read/write operations
+to different devices.
+
+List of interrupts:
+	Screen write:
+		al = 0x01
+		bl:si = address to null-terminated string to print
+		Write string to VGA-screen
+
+	Screen clear:
+		al = 0x02
+		Clear VGA-screen
+
+	reset cpu:
+		al = 0x03
+		Reset the CPU
+
+	poweroff:
+		al = 0x04
+		Hang the CPU
+
+	get cpuid:
+		al = 0x05
+
+	get serial number:
+		al = 0x06
+	
+	delay:
+		al = 0x07
+		bl = cycle-count
+		Sleep for bl cycles.
+
+	serial read:
+		al = 0x08
+		di = byte red.
+		Set carry flag on error
+
+	serial write:
+		al = 0x09
+		si = byte to send
+		Set carry flag on error
+
+	i2c write:
+		al = 0x0A
+		bl:di = write-address
+		si = byte to write
+		Set carry flag on error
+
+	i2c read:
+		al = 0x0B
+		bl:si = read-address
+		di = byte red
+		Set carry flag on error
+
+	spi write:
+		al = 0x0C
+		bl = write-address
+		si = byte to write
+		Set carry flag on error
+
+	spi read:
+		al = 0x0D
+		bl = read-address
+		di = byte red
+		Set carry flag on error		
+
+Note that i2c & spi read and write operations are only permitted
+to be done by firmware code (pc < 0x0200).
+	
+---------------------------------------------------------------------------- 
+
+Memory maps for CPU:
+
+	DATA:
+
+	Address space   : r/w/x : description
+	0x0000 - 0x00A0 : 0/0/0 : Interrupt Handler Data
+	0x00A1 - 0x00FF : 1/0/0 : Reserved
+	0x0100 - 0x0fff : 1/1/0 : Free
+
+	CODE:
+
+	0x0000 - 0x01ff : 0/0/1 : Firmware & interrupt handler code
+	0x0200 - 0x0fff : 1/1/1 : Free
+
+There is also a tiny memory-chip attached over SPI-bus to be used by
+firmware code. Bootloader-code should never be able to interact with
+stored data.
+
+----------------------------------------------------------------------------
+
